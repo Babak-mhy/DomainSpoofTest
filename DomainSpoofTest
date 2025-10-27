@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""
+Interactive Email Spoofing Test Script
+Used to test if emails can be spoofed to your domain
+Requires proper authorization before use
+"""
+
+import smtplib
+import socket
+import sys
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+def test_smtp_spoof(from_email, to_email, subject, body, smtp_server, smtp_port):
+    """
+    Test SMTP spoofing by sending an email with a forged sender address
+    """
+    try:
+        # Create message
+        msg = MIMEMultipart()
+        msg['From'] = from_email
+        msg['To'] = to_email
+        msg['Subject'] = subject
+        
+        # Add body to email
+        msg.attach(MIMEText(body, 'plain'))
+        
+        # Create SMTP session
+        print(f"\n[*] Connecting to {smtp_server}:{smtp_port}")
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.set_debuglevel(1)  # Enable debug output
+        
+        # Try to send the email without authentication (common vulnerability)
+        print(f"[*] Attempting to send spoofed email from {from_email} to {to_email}")
+        text = msg.as_string()
+        server.sendmail(from_email, to_email, text)
+        server.quit()
+        
+        return True, "Spoofed email sent successfully - domain is vulnerable!"
+        
+    except Exception as e:
+        return False, f"Failed to send spoofed email: {str(e)}"
+
+def test_open_relay(target_smtp):
+    """
+    Test if an SMTP server is configured as an open relay
+    """
+    try:
+        # Connect to the SMTP server
+        print(f"[*] Testing if {target_smtp} is an open relay...")
+        server = smtplib.SMTP(target_smtp, 25, timeout=10)
+        server.ehlo_or_helo_if_needed()
+        
+        # Try to send email without authentication
+        from_addr = "spoofed@example.com"
+        to_addr = "test@yourdomain.com"
+        
+        server.mail(from_addr)
+        code, msg = server.rcpt(to_addr)
+        
+        server.quit()
+        
+        if code == 250:
+            return True, f"{target_smtp} appears to be an open relay"
+        else:
+            return False, f"{target_smtp} is not an open relay (code: {code})"
+            
+    except Exception as e:
+        return False, f"Error testing open relay: {str(e)}"
+
+def get_user_input():
+    """
+    Prompt user for all required inputs
+    """
+    print("=== Email Spoofing Test Tool ===")
+    print("Please provide the following information:\n")
+    
+    # Get target domain and email addresses
+    target_domain = input("Enter your target domain (e.g., company.com): ").strip()
+    spoofed_email = input(f"Enter spoofed sender email (e.g., admin@{target_domain}): ").strip()
+    recipient_email = input(f"Enter recipient email (your test email): ").strip()
+    
+    # Get SMTP server information
+    smtp_server = input("Enter SMTP server address (press Enter for localhost): ").strip()
+    if not smtp_server:
+        smtp_server = "localhost"
+    
+    # Get SMTP port
+    smtp_port_input = input("Enter SMTP port (press Enter for 25): ").strip()
+    smtp_port = int(smtp_port_input) if smtp_port_input else 25
+    
+    # Get email content
+    subject = input("Enter email subject (press Enter for default): ").strip()
+    if not subject:
+        subject = "Pentest Alert: Spoofing Test"
+    
+    body = input("Enter email body (press Enter for default): ").strip()
+    if not body:
+        body = "This is a penetration test to check email spoofing protections."
+    
+    # Confirm before sending
+    print("\n--- Test Summary ---")
+    print(f"Target domain: {target_domain}")
+    print(f"Spoofed from: {spoofed_email}")
+    print(f"Sending to: {recipient_email}")
+    print(f"SMTP server: {smtp_server}:{smtp_port}")
+    print(f"Subject: {subject}")
+    print("--------------------")
+    
+    confirm = input("\nProceed with test? (y/N): ").strip().lower()
+    if confirm not in ['y', 'yes']:
+        print("Test cancelled.")
+        return None
+    
+    return {
+        'from_email': spoofed_email,
+        'to_email': recipient_email,
+        'subject': subject,
+        'body': body,
+        'smtp_server': smtp_server,
+        'smtp_port': smtp_port,
+        'target_domain': target_domain
+    }
+
+def main():
+    # Get user input
+    config = get_user_input()
+    if not config:
+        sys.exit(0)
+    
+    print("\n=== Starting Email Spoofing Test ===")
+    
+    # Test basic SMTP spoofing
+    success, result = test_smtp_spoof(
+        config['from_email'], 
+        config['to_email'], 
+        config['subject'], 
+        config['body'],
+        config['smtp_server'],
+        config['smtp_port']
+    )
+    
+    print(f"\n[RESULT] {result}")
+    
+    if success:
+        print("\n⚠️  ALERT: Your email system may be vulnerable to spoofing!")
+        print("Recommendation: Implement SPF, DKIM, and DMARC records")
+        print("Also check if the SMTP server is an open relay")
+        
+        # Offer to test open relay
+        test_relay = input("\nWould you like to test if the SMTP server is an open relay? (y/N): ").strip().lower()
+        if test_relay in ['y', 'yes']:
+            relay_success, relay_result = test_open_relay(config['smtp_server'])
+            print(f"[RELAY TEST] {relay_result}")
+    else:
+        print("\n✅ Email spoofing attempt failed.")
+        print("Your system may have adequate protections in place.")
+
+if __name__ == "__main__":
+    main()
